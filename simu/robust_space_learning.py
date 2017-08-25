@@ -3,14 +3,7 @@
 # @Author: yancz1989
 # @Date:   2015-11-09 19:07:28
 # @Last Modified by:   yancz1989
-# @Last Modified time: 2017-08-22 08:37:02
-
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# @Author: yancz1989
-# @Date:   2016-02-26 09:12:16
-# @Last Modified by:   yancz1989
-# @Last Modified time: 2016-03-14 21:47:44
+# @Last Modified time: 2017-08-25 17:19:40
 
 import numpy as np
 import scipy as sp
@@ -20,24 +13,6 @@ from util import *
 from scipy import io as sio
 from PIL import Image
 import time
-
-# def meta(I0, coords, Isize, As):
-#     Iy0, Ix0 = np.gradient(I0)
-#     idx = []
-#     mpX = [0]
-#     mpE = [0]
-#     U = []
-#     V = []
-
-#     for (A, coor) in zip(As, coords):
-#         idx += [i * Isize[1] + j for i in range(coor[2], coor[3]) for j in range(coor[0], coor[1])]
-#         mpX.append(A.shape[1])
-#         mpE.append(len(idx))
-#         U += [j + 1 for i in range(coor[2], coor[3]) for j in range(coor[0], coor[1])]
-#         V += [i + 1 for i in range(coor[2], coor[3]) for j in range(coor[0], coor[1])]
-#     for i in range(len(mpX) - 1):
-#         mpX[i + 1] = mpX[i] + mpX[i + 1]
-#     return (Ix0, Iy0, np.array(idx), np.array(U), np.array(V), mpX, mpE)
 
 def meta(I, Isize):
   Iy, Ix = np.gradient(I)
@@ -76,7 +51,7 @@ def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
       np.zeros((n, w, h)), np.zeros((n, w, h))]
   Us, Vs = np.zeros((n, w, h)), np.zeros((n, w, h))
   Qs, Rs = np.zeros((n, (w * h), 8)), np.zeros((n, 8, 8))
-  Ts, dXs = np.zeros((n, 3, 3)), np.zeros((n, 3, 3))
+  Ts, dXs = np.zeros((n, 3, 3)), np.zeros((n, 8))
   Js = np.zeros(n, (w * h), 8)
 
   for i, I in enumerate(Is):
@@ -95,6 +70,8 @@ def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
   pre = 1.0e20
   converage = 0
 
+  tol = 1e-7
+
   # outer loop
   st = time.clock()
   while out_iter < maxi_out:
@@ -106,56 +83,16 @@ def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
 
     # get D = A + E and delta_T
     iit = 1
+    Y = D
+    norm2 = 
     while iit < maxi_in:
       iit += 1
 
 
     in_iter += iit
     for i in range(n):
-      Ts[i] = Ts[i] + 
+      Ts[i].ravel()[:8] = Ts[i].ravel()[:8] + np.linalg.inv(Rs[i]).dot(dXs[i])
 
 
-
-  while out_iter < maxi_out:
-    out_iter += 1
-    Ix, Iy, I, J, Inorm = jacobian(I0, Ix0, Iy0, idx, U, V, T, Isize, mpE)
-    # print J
-    Q, R = LA.qr(J)
-    # inner loop
-    mu = 1.25 / LA.norm(I)
-    dual_norm = max(LA.norm(I), LA.norm(I, np.inf) / lmbd)
-
-    Y = I / dual_norm
-    iiter = 0
-    e = np.zeros(len(idx))
-    Ax = np.hstack(np.array([A[:, 0] for A in As]))
-    while iiter < maxi_in:
-      iiter += 1
-      Jdltau = -Q.T.dot(I - e - Ax + 1 / mu * Y)
-      Jm = Q.dot(Jdltau)
-      tmp = I + Jm - Ax + 1 / mu * Y
-      e = np.sign(tmp) * (np.abs(tmp) > (lmbd / mu)) * (np.abs(tmp) - lmbd / mu)
-      tmp = I + Jm - e + 1 / mu * Y
-      for (i, IA, A) in zip(range(len(As)), IAs, As):
-        iX = range(mpX[i], mpX[i + 1])
-        iE = range(mpE[i], mpE[i + 1])
-        x[iX] = IA.dot(tmp[iE])
-        Ax[iE] = A.dot(x[iX])
-      Z = I + Jm - Ax - e
-      Y = Y + mu * Z
-      mu = mu * rho
-      if LA.norm(Z) / LA.norm(I) < 1e-5:
-        break
-        
-    in_iter += iiter
-    delta_tau = LA.pinv(R).dot(Jdltau)
-    tau = tau + delta_tau
-    T.ravel()[0 : 8] = tau
-    # print T
-    if abs(LA.norm(e, 1) - pre) < 1e-3:
-      converage = 1
-      break;
-    else:
-      pre = LA.norm(e, 1)
   return (T, converage, time.clock() - st, in_iter, out_iter)
 
