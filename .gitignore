@@ -102,3 +102,4 @@ ENV/
 *.json
 simu/dat/
 doc/
+simu/ocr/libjt/

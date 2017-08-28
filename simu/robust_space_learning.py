@@ -3,16 +3,16 @@
 # @Author: yancz1989
 # @Date:   2015-11-09 19:07:28
 # @Last Modified by:   yancz1989
-# @Last Modified time: 2017-08-25 17:19:40
+# @Last Modified time: 2017-08-28 00:36:52
 
 import numpy as np
 import scipy as sp
-import cv2
 from numpy import linalg as LA
-from util import *
-from scipy import io as sio
+import scipy.sparse.linalg as sLA
 from PIL import Image
 import time
+
+import cv2
 
 def meta(I, Isize):
   Iy, Ix = np.gradient(I)
@@ -39,25 +39,27 @@ def jacobian(I0, Ix0, Iy0, U, V, T, Isize):
           Iy * U / P, Iy * V / P, Iy / P,
           -Ix * X * U / (P ** 2) - Iy * Y * U / (P ** 2),
           -Ix * X * V / (P ** 2) - Iy * Y * V / (P ** 2) )).T
-  return J
+  return J, I
+
+def thresholding(x, thr):
+  return np.maximum(x - thr, 0)
 
 def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
   n = Is.shape[0]
   h = Is.shape[1]
   w = Is.shape[2]
-  D, A, E, Ad, Ed, Ixs, Iys = [np.zeros((w * h, n)),
+  D, Ad, Ed, Ixs, Iys = [np.zeros((w * h, n)),
       np.zeros((w * h, n)), np.zeros((w * h, n)),
-      np.zeros((w * h, n)), np.zeros((w * h, n)),
-      np.zeros((n, w, h)), np.zeros((n, w, h))]
-  Us, Vs = np.zeros((n, w, h)), np.zeros((n, w, h))
+      np.zeros((n, h, w)), np.zeros((n, h, w))]
+  Us, Vs = np.zeros((n, (h * w))), np.zeros((n, (h * w)))
   Qs, Rs = np.zeros((n, (w * h), 8)), np.zeros((n, 8, 8))
   Ts, dXs = np.zeros((n, 3, 3)), np.zeros((n, 8))
-  Js = np.zeros(n, (w * h), 8)
+  Js = np.zeros((n, (w * h), 8))
 
   for i, I in enumerate(Is):
-    D[:, i], Ixs[i], Iys[i], Us[i], V[i] = meta(
-            I.astype(np.float64), Isize)
-    T[i] = np.eye(3)
+    D[:, i], Ixs[i], Iys[i], Us[i], Vs[i] = meta(
+            I.astype(np.float64), (h, w))
+    Ts[i] = np.eye(3)
 
   out_iter = 0
   in_iter = 0
@@ -65,8 +67,6 @@ def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
   rho = 1.25
   lmbd = 1.0 / 100
   cur = 0
-  IAs = np.array([LA.pinv(A) for A in As])
-  x = np.zeros(np.sum([A.shape[1] for A in As]))
   pre = 1.0e20
   converage = 0
 
@@ -77,22 +77,56 @@ def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
   while out_iter < maxi_out:
     out_iter += 1
     for i in range(n):
-      Js[i] = jacobian(Is[i], Ixs[i], Iys[i], Us[i], Vs[i], Ts[i], (h, w))
+      Js[i], D[:, i] = jacobian(Is[i], Ixs[i], Iys[i], Us[i], Vs[i], Ts[i], (h, w))
       Qs[i], Rs[i] = np.linalg.qr(Js[i])
     lmbd = 1 / np.sqrt(w * h)
 
     # get D = A + E and delta_T
     iit = 1
     Y = D
-    norm2 = 
+    norm2 = np.linalg.norm(Y, ord = 2)
+    norm_inf = np.linalg.norm(Y, np.inf)
+    dn = max(norm2, norm_inf)
+    normf = np.linalg.norm(Y, ord = 'fro')
+    Y = Y / dn
+    Ad, Ed, dt, dtm, mu, rho = (np.zeros(D.shape), np.zeros(D.shape), 
+        np.zeros((n, 8)), np.zeros(D.shape), 1.25 / normf, 1.25)
     while iit < maxi_in:
       iit += 1
 
+      tmp = D + dtm - Ed + (1. / mu) * Y
+      U, S, V = sLA.svds(tmp, k = 10)
+      Shat = thresholding(S, 1. / mu)
+      Ad = U.dot(np.diag(Shat).dot(V))
+
+      tmp = D + dtm - Ad + 1. / mu * Y
+      Ed = np.sign(tmp) * np.maximum(np.abs(tmp) - lmbd / mu, 0.)
+
+      tmp = D - Ed - Ad + 1. / mu * Y
+      for i in range(n):
+        dt[i, :] = -Js[i].T.dot(tmp[:, i]).T
+        dtm[:, i] = Js[i].dot(dt[i, :])
+
+      Z = D + dtm - Ad - Ed
+      Y = Y + mu * Z
+      mu = mu * rho
+
+      obj = np.sum(Shat) + np.sum(Ed)
+      if np.linalg.norm(Z, 'fro') / dn < tol:
+        print('stop after inner iterations %d, at obj value %f.' % (
+          iit, obj))
+      elif iit % 50 == 0:
+        print('inner iteration %d, objv %f' % (iit, obj))
 
     in_iter += iit
     for i in range(n):
       Ts[i].ravel()[:8] = Ts[i].ravel()[:8] + np.linalg.inv(Rs[i]).dot(dXs[i])
+    print('Out iteration, obj value %f.' % obj)
+    if pre - obj < 1e-5:
+      print('previous obj %f, diff %f, stopped.' % (pre, obj))
+      break
+    pre = obj
 
-
-  return (T, converage, time.clock() - st, in_iter, out_iter)
+  return (T, Ad, Ed, Ts, D, converage,
+              time.clock() - st, in_iter, out_iter)
 

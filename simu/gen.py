@@ -2,23 +2,27 @@
 # @Author: yancz1989
 # @Date:   2016-10-20 22:36:50
 # @Last Modified by:   yancz1989
-# @Last Modified time: 2017-08-20 21:19:15
-import numpy as np
-import scipy as sp
-
-import cv2
-import sys
-import PIL
-
-from PIL import ImageDraw, Image, ImageFont
+# @Last Modified time: 2017-08-28 00:47:13
 
 import os
 import os.path
-import json
-
 import shutil
+import json
 from json import encoder
 import itertools
+import logging
+
+import numpy as np
+import scipy as sp
+
+import PIL
+from PIL import ImageDraw, Image, ImageFont
+
+def get_input(root):
+  Is = np.array([np.array(Image.open(root + '/' + f)) for f in os.listdir(root) if (not f[0] == '.' and f[-3:] == 'bmp')])
+  print(Is.shape)
+  logging.info('date size (%d, %d, %d).' % (Is.shape[0], Is.shape[1], Is.shape[2]))
+  return Is
 
 def rtransform(pos, rangeA, rangeP):
   def affM(idx, val):
@@ -121,9 +125,9 @@ def do_draw(chars, para, r):
 
 def gen_exp():
   style = [0, 1, 2]
-  Arange = [3., 5., 10.]
-  Prange = [1e-4]
-  acc = [.9, .8, .7]
+  Arange = [0., 3., 5., 10.]
+  Prange = [0., 1e-4]
+  acc = [1., .9, .8, .7]
   for k, K in enumerate(itertools.product(style, Arange, Prange, acc)):
     format = gen_format(K[0], K[1], K[2], K[3], k)
     if not os.path.exists('dat/imgs/' + format['name']):
