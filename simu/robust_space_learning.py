@@ -3,7 +3,7 @@
 # @Author: yancz1989
 # @Date:   2015-11-09 19:07:28
 # @Last Modified by:   yancz1989
-# @Last Modified time: 2017-08-28 00:36:52
+# @Last Modified time: 2017-08-30 00:22:22
 
 import numpy as np
 import scipy as sp
@@ -12,8 +12,6 @@ import scipy.sparse.linalg as sLA
 from PIL import Image
 import time
 
-import cv2
-
 def meta(I, Isize):
   Iy, Ix = np.gradient(I)
   U = [j + 1 for i in range(Isize[0]) for j in range(Isize[1])]
@@ -21,10 +19,12 @@ def meta(I, Isize):
   return (I.flatten(), Ix, Iy, np.array(U), np.array(V))
 
 def jacobian(I0, Ix0, Iy0, U, V, T, Isize):
-  T_ = LA.inv(T)
-  Iwarp = cv2.warpPerspective(I0, T_, (Isize[1], Isize[0]), borderValue = 0, flags = cv2.INTER_CUBIC)
-  Ix = cv2.warpPerspective(Ix0, T_, (Isize[1], Isize[0]), borderValue = 255, flags = cv2.INTER_CUBIC).flatten()
-  Iy = cv2.warpPerspective(Iy0, T_, (Isize[1], Isize[0]), borderValue = 255, flags = cv2.INTER_CUBIC).flatten()
+  Iwarp = np.array(Image.fromarray(I0).transform(
+    (Isize[1], Isize[0]), Image.PERSPECTIVE, T.ravel()[:8], Image.BICUBIC))
+  Ix = np.array(Image.fromarray(Ix0).transform(
+    (Isize[1], Isize[0]), Image.PERSPECTIVE, T.ravel()[:8], Image.BICUBIC)).flatten()
+  Iy = np.array(Image.fromarray(Iy0).transform(
+    (Isize[1], Isize[0]), Image.PERSPECTIVE, T.ravel()[:8], Image.BICUBIC)).flatten()
 
   I = Iwarp.flatten()
   Inorm = LA.norm(I)
@@ -79,23 +79,26 @@ def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
     for i in range(n):
       Js[i], D[:, i] = jacobian(Is[i], Ixs[i], Iys[i], Us[i], Vs[i], Ts[i], (h, w))
       Qs[i], Rs[i] = np.linalg.qr(Js[i])
-    lmbd = 1 / np.sqrt(w * h)
+    lmbd = 1. / np.sqrt(w * h)
 
     # get D = A + E and delta_T
     iit = 1
     Y = D
     norm2 = np.linalg.norm(Y, ord = 2)
-    norm_inf = np.linalg.norm(Y, np.inf)
+    norm_inf = np.linalg.norm(Y.flatten(), np.inf) / lmbd
     dn = max(norm2, norm_inf)
-    normf = np.linalg.norm(Y, ord = 'fro')
     Y = Y / dn
+
+    normf = np.linalg.norm(Y, ord = 'fro')
     Ad, Ed, dt, dtm, mu, rho = (np.zeros(D.shape), np.zeros(D.shape), 
         np.zeros((n, 8)), np.zeros(D.shape), 1.25 / normf, 1.25)
+
     while iit < maxi_in:
       iit += 1
 
       tmp = D + dtm - Ed + (1. / mu) * Y
-      U, S, V = sLA.svds(tmp, k = 10)
+      # U, S, V = sLA.svds(tmp, k = 10)
+      U, S, V = np.linalg.svd(tmp, full_matrices = False)
       Shat = thresholding(S, 1. / mu)
       Ad = U.dot(np.diag(Shat).dot(V))
 
@@ -104,18 +107,21 @@ def robust_space_alignment(Is, maxi_out = 100, maxi_in = 1000):
 
       tmp = D - Ed - Ad + 1. / mu * Y
       for i in range(n):
-        dt[i, :] = -Js[i].T.dot(tmp[:, i]).T
-        dtm[:, i] = Js[i].dot(dt[i, :])
+        dt[i, :] = -Qs[i].T.dot(tmp[:, i]).T
+        dtm[:, i] = Qs[i].dot(dt[i, :])
 
       Z = D + dtm - Ad - Ed
       Y = Y + mu * Z
       mu = mu * rho
 
-      obj = np.sum(Shat) + np.sum(Ed)
-      if np.linalg.norm(Z, 'fro') / dn < tol:
+      nuc = np.sum(Shat)
+      l1 =  np.sum(np.abs(Ed))
+      obj = nuc + l1
+      print('nuc %f l1 %f' % (nuc, l1))
+      if np.linalg.norm(Z, 'fro') / normf < tol:
         print('stop after inner iterations %d, at obj value %f.' % (
           iit, obj))
-      elif iit % 50 == 0:
+      elif iit % 5 == 0:
         print('inner iteration %d, objv %f' % (iit, obj))
 
     in_iter += iit
